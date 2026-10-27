@@ -28,8 +28,10 @@ qt_internal_add_module(QmlLSPrivate
         qqmlrenamesymbolsupport_p.h qqmlrenamesymbolsupport.cpp
         qqmlcompletioncontextstrings_p.h qqmlcompletioncontextstrings.cpp
         qqmlhover_p.h qqmlhover.cpp
+        qqmllstypedocumentation_p.h qqmllstypedocumentation.cpp
         qqmllsplugin_p.h
         qqmllscompletion.cpp qqmllscompletion_p.h
+        qqmllsvaluecompletion.cpp qqmllsvaluecompletion_p.h
         qqmllscompletionplugin.cpp qqmllscompletionplugin_p.h
         qdochtmlparser_p.h qdochtmlparser.cpp
         qqmlhighlightsupport_p.h qqmlhighlightsupport.cpp

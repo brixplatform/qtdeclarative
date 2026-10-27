@@ -3,6 +3,7 @@
 // Qt-Security score:significant reason:default
 
 #include "qqmlhover_p.h"
+#include "qqmllstypedocumentation_p.h"
 #include <QtQmlLS/private/qqmllshelputils_p.h>
 
 QT_BEGIN_NAMESPACE
@@ -31,11 +32,6 @@ void QQmlHover::process(RequestPointerArgument request)
     HelpManager *helpManager =
             m_codeModelManager->helpManagerForUrl(request->m_parameters.textDocument.uri);
 
-    if (!helpManager) {
-        qCWarning(hoverLog)
-                << "No help manager is available, documentation hints will not function!";
-        return;
-    }
     using namespace QQmlJS::Dom;
     QLspSpecification::Hover result;
     ResponseScopeGuard guard(result, request->m_response);
@@ -54,7 +50,16 @@ void QQmlHover::process(RequestPointerArgument request)
         return;
     }
 
-    const auto documentation = helpManager->documentationForItem(file, position);
+    const auto prose = helpManager ? helpManager->documentationForItem(file, position)
+                                   : std::optional<QByteArray>{};
+    auto documentation = qmlTypeReference(file, position);
+    if (documentation && prose)
+        *documentation += "\n## Documentation\n\n" + *prose;
+    else if (documentation)
+        *documentation += "Qt's prose documentation is not installed/available for this type. "
+                          "This reference contains resolved API metadata.\n";
+    else
+        documentation = prose;
     if (!documentation.has_value()) {
         qCDebug(hoverLog)
                 << QStringLiteral(

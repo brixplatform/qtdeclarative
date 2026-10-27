@@ -3,6 +3,7 @@
 // Qt-Security score:significant reason:default
 
 #include "qqmllsutils_p.h"
+#include <QtCore/qlibraryinfo.h>
 
 #include <QtCore/qassert.h>
 #include <QtLanguageServer/private/qlanguageserverspectypes_p.h>
@@ -2007,10 +2008,31 @@ static std::optional<Location> createCppTypeLocation(const QString &fileName,
                                                      const QStringList &headerLocations,
                                                      const QQmlJS::SourceLocation &location)
 {
+    if (fileName.isEmpty())
+        return {};
     const TextPosition endPosition{ static_cast<int>(location.startLine) + 1, 1 };
     const QFileInfo filePathInfo(fileName);
     if (filePathInfo.isAbsolute() && filePathInfo.exists())
         return Location{ fileName, location, endPosition };
+
+    // qmltypes can name a Qt header relative to its module, including
+    // private/ headers. Resolve installed SDK layouts directly before a
+    // bounded project search; comparing a relative path with entry.fileName()
+    // can never find such a header.
+    QStringList candidates;
+    for (const auto &directory : headerLocations)
+        candidates.append(QDir(directory).filePath(fileName));
+    const QDir headers(QLibraryInfo::path(QLibraryInfo::HeadersPath));
+    candidates.append(headers.filePath(fileName));
+    for (const auto &module : headers.entryList({u"Qt*"_s}, QDir::Dirs | QDir::NoDotAndDotDot)) {
+        const QDir directory(headers.filePath(module));
+        candidates.append(directory.filePath(fileName));
+        candidates.append(directory.filePath(QLibraryInfo::version().toString()
+                                            + u'/' + module + u'/' + fileName));
+    }
+    for (const auto &candidate : candidates)
+        if (QFileInfo(candidate).isFile())
+            return Location{ candidate, location, endPosition };
 
     const QString filePath = findFilePathFromFileName(headerLocations, fileName, { });
     if (filePath.isEmpty()) {
@@ -2643,7 +2665,9 @@ static QStringList findFilePathsFromFileNamesImpl(const QStringList &rootDirs,
                 continue;
             }
             Q_ASSERT(entry.isFile());
-            if (!fileNamesToSearch.contains(entry.fileName()))
+            if (std::none_of(fileNamesToSearch.cbegin(), fileNamesToSearch.cend(), [&](const QString &name) {
+                    return name == entry.fileName() || entry.absoluteFilePath().endsWith(u'/' + name);
+                }))
                 continue;
 
             if (ignoredFilePaths.contains(entry.absoluteFilePath()))

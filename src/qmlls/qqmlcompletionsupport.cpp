@@ -12,6 +12,7 @@
 #include <QtQmlDom/private/qqmldomexternalitems_p.h>
 #include <QtQmlDom/private/qqmldomtop_p.h>
 #include <QtQml/private/qqmlsignalnames_p.h>
+#include <QtQml/private/qqmljslexer_p.h>
 
 QT_BEGIN_NAMESPACE
 using namespace QLspSpecification;
@@ -59,7 +60,8 @@ void QmlCompletionSupport::setupCapabilities(QLspSpecification::ServerCapabiliti
     if (caps.completionProvider)
         cOptions = *caps.completionProvider;
     cOptions.resolveProvider = false;
-    cOptions.triggerCharacters = QList<QByteArray>({ QByteArray(".") });
+    cOptions.triggerCharacters = QList<QByteArray>({ QByteArray("."), QByteArray(":"),
+                                                    QByteArray("|"), QByteArray(" ") });
     caps.completionProvider = cOptions;
 }
 
@@ -80,16 +82,34 @@ void CompletionRequest::sendCompletions(const QList<CompletionItem> &completions
     m_response.sendResponse(completions);
 }
 
-static bool positionIsFollowedBySpaces(qsizetype position, const QString &code)
+static bool hasCompletionHole(qsizetype position, const QString &code)
 {
-    if (position >= code.size())
+    // Recover only a missing operand, never punctuation inside a string or comment.
+    QQmlJS::Lexer lexer(nullptr);
+    lexer.setCode(code, 1);
+    int previous = 0;
+    qsizetype end = 0;
+    for (int token = lexer.lex(); token; token = lexer.lex()) {
+        if (lexer.tokenOffset() >= position)
+            break;
+        if (lexer.tokenOffset() + lexer.tokenLength() > position)
+            return false;
+        previous = token;
+        end = lexer.tokenOffset() + lexer.tokenLength();
+    }
+    if (previous != QQmlJSGrammar::T_DOT && previous != QQmlJSGrammar::T_COLON
+        && previous != QQmlJSGrammar::T_OR)
         return false;
-
-    auto newline =
-            std::find_if(std::next(code.cbegin(), position), code.cend(),
-                         [](const QChar &c) { return c == u'\n' || c == u'\r' || !c.isSpace(); });
-
-    return newline == code.cend() || newline->isSpace();
+    if (!QStringView(code).sliced(end, position - end).trimmed().isEmpty())
+        return false;
+    const auto after = QStringView(code).sliced(position);
+    for (const auto character : after) {
+        if (character == u'\n' || character == u'\r')
+            return true;
+        if (!character.isSpace())
+            return character == u'}' || character == u';' || character == u')' || character == u']';
+    }
+    return true;
 }
 
 /*!
@@ -98,7 +118,7 @@ static bool positionIsFollowedBySpaces(qsizetype position, const QString &code)
 \note Remove this method and all its usages once the new fault-tolerant parser from QTBUG-118053 is
 introduced!!!
 
-Tries to make the document valid for the parser, to be able to provide completions after dots.
+Tries to make the document valid for the parser when completion needs a missing operand.
 The created DomItem is not in the qqmlcodemodel which mean it cannot be seen and cannot bother
 other modules: it would be bad to have the linting module complain about code that was modified
 here, but cannot be seen by the user.
@@ -109,14 +129,14 @@ CompletionRequest::patchInvalidFileForParser(const DomItem &file, qsizetype posi
 {
     const QByteArray &uri = m_parameters.textDocument.uri;
 
-    // automatic semicolon insertion after dots, if there is nothing behind the dot!
-    if (position > 0 && code[position - 1] == u'.' && positionIsFollowedBySpaces(position, code)) {
+    // Supply only the missing operand in a completion-local copy of the DOM.
+    if (hasCompletionHole(position, code)) {
         qCWarning(QQmlLSCompletionLog)
-                << "Patching invalid document: adding a semicolon after '.' for "
+                << "Recovering a missing completion operand for "
                 << QString::fromUtf8(uri);
 
         const QString patchedCode =
-                code.first(position).append(u"_dummyIdentifier;").append(code.sliced(position));
+                code.first(position).append(u"_dummyIdentifier").append(code.sliced(position));
 
         // create a new (local) Dom only for the completions.
         // This avoids weird behaviors, like the linting module complaining about the inserted

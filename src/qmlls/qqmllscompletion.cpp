@@ -3,6 +3,7 @@
 // Qt-Security score:significant reason:default
 
 #include "qqmllscompletion_p.h"
+#include "qqmllsvaluecompletion_p.h"
 
 QT_BEGIN_NAMESPACE
 
@@ -362,9 +363,53 @@ void QQmlLSCompletion::methodCompletion(const QQmlJSScope::ConstPtr &scope,
         CompletionItem completion;
         completion.label = name.toUtf8();
         completion.kind = CompletionItemKind::Method;
+        // The compiler already knows these signatures. Keep them in standard
+        // LSP fields rather than making clients infer arguments from the name.
+        QStringList signatures;
+        bool parameterNamesAvailable = true;
+        auto declaringScope = scope;
+        while (declaringScope && declaringScope->ownMethods(name).isEmpty())
+            declaringScope = declaringScope->baseType();
+        const auto overloads = declaringScope ? declaringScope->ownMethods(name)
+                                             : QList<QQmlJSMetaMethod>{method};
+        for (const auto &overload : overloads) {
+            if (overload.access() != QQmlJSMetaMethod::Public)
+                continue;
+            QStringList parameters;
+            for (const auto &parameter : overload.parameters()) {
+                QString value = parameter.name();
+                parameterNamesAvailable = parameterNamesAvailable && !value.isEmpty();
+                if (!parameter.typeName().isEmpty()) {
+                    if (!value.isEmpty()) value += u": "_s;
+                    value += parameter.typeName();
+                }
+                parameters.append(value);
+            }
+            QString signature = name + u'(' + parameters.join(u", "_s) + u')';
+            if (!overload.returnTypeName().isEmpty())
+                signature += u": "_s + overload.returnTypeName();
+            signatures.append(signature);
+        }
+        signatures.removeDuplicates();
+        signatures.sort();
+        if (!signatures.isEmpty()) {
+            const bool singleNamedSignature = signatures.size() == 1 && parameterNamesAvailable;
+            const auto summary = signatures.size() > 1
+                    ? u"%1 overloads"_s.arg(signatures.size())
+                    : u"parameter names unavailable"_s;
+            completion.detail = singleNamedSignature ? signatures.first().toUtf8()
+                    : (name + u" — "_s + summary).toUtf8();
+            CompletionItemLabelDetails labelDetails;
+            labelDetails.detail = singleNamedSignature
+                    ? signatures.first().mid(name.size()).toUtf8()
+                    : (u" · "_s + summary).toUtf8();
+            completion.labelDetails = labelDetails;
+            MarkupContent documentation;
+            documentation.kind = MarkupKind::Markdown;
+            documentation.value = (u"```qml\n"_s + signatures.join(u'\n') + u"\n```"_s).toUtf8();
+            completion.documentation = documentation;
+        }
         it = completion;
-        // TODO: QQmlLSUtils::reachableSymbols seems to be able to do documentation and detail
-        // and co, it should also be done here if possible.
     }
 }
 
@@ -558,6 +603,8 @@ void QQmlLSCompletion::suggestJSExpressionCompletion(const DomItem &scriptIdenti
 
         enumerationCompletion(nearestScope, &usedNames, result);
     } else {
+        if (QQmlLSValueCompletion::dynamicMembers(owner, scriptIdentifier, result))
+            return;
         auto ownerExpressionType = QQmlLSUtils::resolveExpressionType(
                 owner, QQmlLSUtils::ResolveActualTypeForFieldMemberExpression);
         if (!ownerExpressionType || !ownerExpressionType->semanticScope)
@@ -1769,6 +1816,7 @@ QQmlLSCompletion::completions(const DomItem &currentItem,
 {
     QList<CompletionItem> result;
     collectCompletions(currentItem, contextStrings, std::back_inserter(result));
+    QQmlLSValueCompletion::rankBindingValues(currentItem, contextStrings, result);
     return result;
 }
 
