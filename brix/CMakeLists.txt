@@ -36,6 +36,9 @@ if(BUILD_TESTING)
     target_link_libraries(tst_qmlls_utils PRIVATE qmlls_completion Qt6::Test Qt6::QuickTestUtilsPrivate)
     add_test(NAME upstream-completions COMMAND tst_qmlls_utils completions)
     set_tests_properties(upstream-completions PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_test(NAME lsp-bindings COMMAND Python3::Interpreter
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/bindings.py" "$<TARGET_FILE:qmlls>")
+    set_tests_properties(lsp-bindings PROPERTIES TIMEOUT 60)
     add_test(NAME lsp-values COMMAND Python3::Interpreter
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/completions.py" "$<TARGET_FILE:qmlls>" --test)
     set_tests_properties(lsp-values PROPERTIES TIMEOUT 60)

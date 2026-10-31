@@ -163,7 +163,15 @@ QQmlLSCompletion::suggestBindingCompletion(const DomItem &itemAtPosition, BackIn
     if (!scope)
         return;
 
-    propertyCompletion(scope, nullptr, it);
+    QList<CompletionItem> properties;
+    propertyCompletion(scope, nullptr, std::back_inserter(properties));
+    for (CompletionItem &property : properties) {
+        // Only this semantic path offers the left side of a QML binding.
+        // Script references use propertyCompletion() without punctuation.
+        property.insertTextFormat = InsertTextFormat::Snippet;
+        property.insertText = property.label + ": $0";
+        it = property;
+    }
     signalHandlerCompletion(scope, nullptr, it);
 }
 

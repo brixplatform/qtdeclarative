@@ -4761,7 +4761,11 @@ void tst_qmlls_utils::completions()
             }
         } else if (c.kind == CompletionItemKind::Property) {
             QVERIFY2(!propertiesTracker.hasSeen(c.label), "Duplicate property: " + c.label);
-            QCOMPARE(c.insertText, std::nullopt);
+            // Binding-name completions supply punctuation; script references stay bare.
+            if (c.insertText) {
+                QCOMPARE(c.insertTextFormat, InsertTextFormat::Snippet);
+                QCOMPARE(*c.insertText, c.label + ": $0");
+            }
         }
         labels << c.label;
         sortedLabels << c.label;

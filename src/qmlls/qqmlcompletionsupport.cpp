@@ -14,6 +14,8 @@
 #include <QtQml/private/qqmlsignalnames_p.h>
 #include <QtQml/private/qqmljslexer_p.h>
 
+#include <algorithm>
+
 QT_BEGIN_NAMESPACE
 using namespace QLspSpecification;
 using namespace QQmlJS::Dom;
@@ -162,6 +164,49 @@ CompletionRequest::patchInvalidFileForParser(const DomItem &file, qsizetype posi
     return file;
 }
 
+static void finishBindingPropertySnippets(QList<CompletionItem> &items, const QString &code,
+                                          const CompletionContextStrings &context)
+{
+    const qsizetype position = context.offset();
+    qsizetype end = position;
+    int followingToken = 0;
+    QQmlJS::Lexer lexer(nullptr);
+    lexer.setCode(code, 1);
+    for (int token = lexer.lex(); token; token = lexer.lex()) {
+        if (lexer.tokenOffset() + lexer.tokenLength() <= position)
+            continue;
+        if (token == QQmlJSGrammar::T_IDENTIFIER && lexer.tokenOffset() <= position) {
+            end = lexer.tokenOffset() + lexer.tokenLength();
+            followingToken = lexer.lex();
+        } else {
+            followingToken = token;
+        }
+        break;
+    }
+    const auto from = QQmlLSUtils::textRowAndColumnFrom(code,
+            position - context.filterChars().size());
+    const auto to = QQmlLSUtils::textRowAndColumnFrom(code, end);
+    for (CompletionItem &item : items) {
+        // A binding snippet is authored by suggestBindingCompletion(), never
+        // inferred from a property name, prefix or arbitrary JS source text.
+        if (item.kind != CompletionItemKind::Property || item.textEdit
+            || item.insertTextFormat != InsertTextFormat::Snippet
+            || item.insertText != item.label + ": $0")
+            continue;
+        if (followingToken == QQmlJSGrammar::T_COLON
+            || followingToken == QQmlJSGrammar::T_LBRACE
+            || followingToken == QQmlJSGrammar::T_DOT)
+            item.insertText = item.label;
+        TextEdit edit;
+        edit.range.start.line = from.line;
+        edit.range.start.character = from.character;
+        edit.range.end.line = to.line;
+        edit.range.end.character = to.character;
+        edit.newText = *item.insertText;
+        item.textEdit = edit;
+    }
+}
+
 QList<CompletionItem> CompletionRequest::completions(QmlLsp::QQmlCodeModelManager *codeModelManager,
                                                      const QQmlLSCompletion &completionEngine) const
 {
@@ -211,6 +256,7 @@ QList<CompletionItem> CompletionRequest::completions(QmlLsp::QQmlCodeModelManage
                                  << (doc.validDocVersion ? (*doc.validDocVersion) : -1) << "in"
                                  << currentItem.internalKindStr() << currentItem.canonicalPath();
     auto result = completionEngine.completions(currentItem, ctx);
+    finishBindingPropertySnippets(result, code, ctx);
     return result;
 }
 QT_END_NAMESPACE

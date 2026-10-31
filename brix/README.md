@@ -8,6 +8,8 @@ in the language server, so every LSP client can receive the same semantic result
   document, using the QML lexer to avoid modifying strings and comments. The
   document used for diagnostics and saving is unchanged.
 - Advertise `.`, `:`, `|`, and space as completion triggers.
+- Supply `name: ` snippets for semantic QML binding properties. Preserve existing
+  colons, identifier suffixes and grouped/attached access; JS references stay bare.
 - Resolve the expected property type with the server's DOM/import/type model,
   including attached and grouped properties, import aliases, inherited project
   properties, complex values, and QML enums.
