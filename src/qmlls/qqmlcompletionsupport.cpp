@@ -207,6 +207,56 @@ static void finishBindingPropertySnippets(QList<CompletionItem> &items, const QS
     }
 }
 
+static void addObjectDeclarationSnippets(QList<CompletionItem> &items, const QString &code,
+                                         const CompletionContextStrings &context)
+{
+    // Constructor results are creatable QML types from suggestReachableTypes().
+    // Classes in annotations/JS expressions are references.
+    if (std::none_of(items.cbegin(), items.cend(), [](const CompletionItem &item) {
+            return item.kind == CompletionItemKind::Constructor;
+        }))
+        return;
+
+    const qsizetype position = context.offset();
+    qsizetype end = position;
+    int followingToken = 0;
+    QQmlJS::Lexer lexer(nullptr);
+    lexer.setCode(code, 1);
+    for (int token = lexer.lex(); token; token = lexer.lex()) {
+        if (lexer.tokenOffset() + lexer.tokenLength() <= position)
+            continue;
+        // Replace the rest of a partially typed type, preserving its qualifier.
+        if (token == QQmlJSGrammar::T_IDENTIFIER && lexer.tokenOffset() <= position) {
+            end = lexer.tokenOffset() + lexer.tokenLength();
+            followingToken = lexer.lex();
+        } else {
+            followingToken = token;
+        }
+        break;
+    }
+    const auto from = QQmlLSUtils::textRowAndColumnFrom(code,
+            position - context.filterChars().size());
+    const auto to = QQmlLSUtils::textRowAndColumnFrom(code, end);
+    for (CompletionItem &item : items) {
+        if (item.kind != CompletionItemKind::Constructor || item.textEdit || item.insertText)
+            continue;
+        // Existing bodies, including comments before '{', must survive intact.
+        // A final stop inside the pair also lets Enter expand it with the
+        // client's own indentation settings, without guessing required members.
+        item.insertTextFormat = InsertTextFormat::Snippet;
+        item.insertText = item.label;
+        if (followingToken == QQmlJSGrammar::T_DOT)
+            item.kind = CompletionItemKind::Class;
+        else if (followingToken != QQmlJSGrammar::T_LBRACE)
+            *item.insertText += " {$0}";
+        TextEdit edit;
+        edit.range = { { quint32(from.line), quint32(from.character) },
+                       { quint32(to.line), quint32(to.character) } };
+        edit.newText = *item.insertText;
+        item.textEdit = edit;
+    }
+}
+
 QList<CompletionItem> CompletionRequest::completions(QmlLsp::QQmlCodeModelManager *codeModelManager,
                                                      const QQmlLSCompletion &completionEngine) const
 {
@@ -257,6 +307,7 @@ QList<CompletionItem> CompletionRequest::completions(QmlLsp::QQmlCodeModelManage
                                  << currentItem.internalKindStr() << currentItem.canonicalPath();
     auto result = completionEngine.completions(currentItem, ctx);
     finishBindingPropertySnippets(result, code, ctx);
+    addObjectDeclarationSnippets(result, code, ctx);
     return result;
 }
 QT_END_NAMESPACE

@@ -207,6 +207,36 @@ def main():
                 assert method['detail'] == 'sum(x: int, y: int): int', method
                 assert method['labelDetails']['detail'] == '(x: int, y: int): int', method
                 print('PASS compiler method signature', method['detail'])
+                # Only QML object declarations receive braces. Annotations and
+                # embedded JS references retain their standard Class metadata.
+                objects = [
+                    ('import QtQuick\nTe@ {}', 'Text', 'Text'),
+                    ('import QtQuick\nItem {\n    Te@\n}', 'Text', 'Text {$0}'),
+                    ('import QtQuick as Quick\nQuick.Item { Quick.Te@ }', 'Text', 'Text {$0}'),
+                    ('import QtQuick\nItem { property Item header: Te@ }', 'Text', 'Text {$0}'),
+                    ('import QtQuick\nRepeater { delegate: Te@ }', 'Text', 'Text {$0}'),
+                    ('import QtQuick\nItem { Te@ { text: "Keep" } }', 'Text', 'Text'),
+                    ('import QtQuick\nItem { Te@xt { text: "Keep" } }', 'Text', 'Text'),
+                    ('import QtQuick\nItem { Te@ /* keep */ { text: "Keep" } }', 'Text', 'Text'),
+                ]
+                for document, label, insertion in objects:
+                    items = server.complete(document)
+                    completion = next(i for i in items if i['label'] == label and i['kind'] == 4)
+                    assert completion['insertTextFormat'] == 2, completion
+                    assert completion['insertText'] == insertion, completion
+                    edit = completion['textEdit']
+                    assert edit['newText'] == insertion, completion
+                    if 'Te@xt' in document:
+                        assert edit['range']['end']['character'] - edit['range']['start']['character'] == 4, completion
+                    print('PASS object declaration', document, insertion)
+                for document, label in [
+                    ('import QtQuick\nItem { property Te@ value }', 'Text'),
+                    ('import QtQuick\nItem { Component.onCompleted: { Com@ } }', 'Component'),
+                    ('import QtQuick\nText { horizontalAlignment: Te@.AlignLeft }', 'Text'),
+                ]:
+                    reference = next(i for i in server.complete(document) if i['label'] == label)
+                    assert reference['kind'] == 7 and '{' not in reference.get('insertText', ''), reference
+                    print('PASS type reference', document)
                 position = server.open('import QtQml\nTi@mer { interval: 500 }')
                 hover = server.request('textDocument/hover', position)
                 assert hover['contents']['kind'] == 'markdown', hover
@@ -221,7 +251,7 @@ def main():
                 print('PASS native Timer reference and real declaration', definition)
                 if failures:
                     raise AssertionError(f'{len(failures)} failed: {failures}')
-                print(f'{len(cases) + len(checks) + len(negative) + len(dynamic) + 2} LSP completion cases passed')
+                print(f'{len(cases) + len(checks) + len(negative) + len(dynamic) + len(objects) + 5} LSP completion cases passed')
         finally:
             log = server.close()
             if args.report:

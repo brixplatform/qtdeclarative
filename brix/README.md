@@ -23,6 +23,9 @@ in the language server, so every LSP client can receive the same semantic result
 - Preserve compiler-known method signatures, return/parameter types and overload
   documentation in standard LSP fields. Ambiguous overloads remain explicit;
   clients must not treat an arbitrary overload as the required call signature.
+- Supply brace snippets for QML object declarations, with the cursor inside the
+  new body. Preserve existing bodies and qualified imports; type annotations and
+  JavaScript references stay bare names. Use standard LSP snippets and edit ranges.
 - Infer dynamic record fields from bounded DOM literals or accesses to the same
   resolved receiver, including explicitly declared delegate `modelData`. Literal
   field types and observation provenance remain distinct. This is limited QML
