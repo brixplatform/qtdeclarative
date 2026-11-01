@@ -26,6 +26,9 @@ in the language server, so every LSP client can receive the same semantic result
 - Supply brace snippets for QML object declarations, with the cursor inside the
   new body. Preserve existing bodies and qualified imports; type annotations and
   JavaScript references stay bare names. Use standard LSP snippets and edit ranges.
+- Identify component origins in standard `labelDetails.description`: the semantic
+  defining module, independent of import aliases, or the local source filename
+  for components without a named module. Never infer origin from the base type.
 - Infer dynamic record fields from bounded DOM literals or accesses to the same
   resolved receiver, including explicitly declared delegate `modelData`. Literal
   field types and observation provenance remain distinct. This is limited QML

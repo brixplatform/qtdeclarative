@@ -4,6 +4,7 @@
 
 #include "qqmllscompletion_p.h"
 #include "qqmllsvaluecompletion_p.h"
+#include <QtCore/qfileinfo.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -328,6 +329,15 @@ void QQmlLSCompletion::suggestReachableTypes(const DomItem &el, LocalSymbolsType
         CompletionItem completion;
         completion.label = QStringView(type.first).sliced(requiredQualifiers.size()).toUtf8();
         completion.kind = kind;
+        // Report the defining module, independently of an import alias or the
+        // base type. Local components without a module identify their source.
+        const QString module = scope->moduleName();
+        const QString origin = module.isEmpty() ? QFileInfo(scope->filePath()).fileName() : module;
+        if (!origin.isEmpty()) {
+            CompletionItemLabelDetails details;
+            details.description = origin.toUtf8();
+            completion.labelDetails = details;
+        }
         it = completion;
     }
 }

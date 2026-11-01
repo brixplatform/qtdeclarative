@@ -12,18 +12,22 @@ import threading
 import time
 
 class Server:
-    def __init__(self, executable, root):
+    def __init__(self, executable, root, import_paths=()):
         self.root = pathlib.Path(root)
         self.errors = tempfile.TemporaryFile()
         self.log = self.root / 'server.log'
-        self.process = subprocess.Popen([executable, '--no-cmake-calls', '-l', str(self.log)], stdin=subprocess.PIPE,
+        arguments = [executable, '--no-cmake-calls', '-l', str(self.log)]
+        for path in import_paths:
+            arguments += ['-I', str(path)]
+        self.process = subprocess.Popen(arguments, stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=self.errors)
         self.messages = queue.Queue()
         self.sequence = 0
         self.timings = []
         threading.Thread(target=self.read, daemon=True).start()
         initialized = self.request('initialize', {'processId': None, 'rootUri': self.root.as_uri(),
-            'capabilities': {'textDocument': {'completion': {'completionItem': {'snippetSupport': True}}}}})
+            'capabilities': {'textDocument': {'completion': {'completionItem': {
+                'snippetSupport': True, 'labelDetailsSupport': True}}}}})
         self.capabilities = initialized['capabilities']
         self.send('initialized', {})
 
@@ -102,8 +106,12 @@ def main():
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='qmlls-values-') as root:
         (pathlib.Path(root) / 'Fancy.qml').write_text(
-            'import QtQuick\nText { enum Mode { Fast, Slow }; property Mode mode; property string headline: "Hello"; property font titleFont }\n')
-        server = Server(args.server, root)
+            'import QtQuick\nText { enum Mode { Fast, Slow }\n property Mode mode; property string headline: "Hello"; property font titleFont }\n')
+        module = pathlib.Path(root) / 'Acme' / 'Widgets'
+        module.mkdir(parents=True)
+        (module / 'qmldir').write_text('module Acme.Widgets\nKnob 1.0 Knob.qml\n')
+        (module / 'Knob.qml').write_text('import QtQuick\nItem {}\n')
+        server = Server(args.server, root, import_paths=[root])
         try:
             source = ('import QtQuick\nimport QtQuick.Layouts\nText {\n id: root\n'
                       ' property font bodyFont\n property string heading\n property int preferredSize\n'
@@ -112,6 +120,19 @@ def main():
                 print(json.dumps(server.complete(source), indent=2))
             else:
                 assert {'.', ':', '|', ' '} <= set(server.capabilities['completionProvider']['triggerCharacters'])
+                origins = [
+                    ('import QtQuick\nItem { Te@ }', 'Text', 'QtQuick'),
+                    ('import QtQuick as Quick\nQuick.Item { Quick.Te@ }', 'Text', 'QtQuick'),
+                    ('import QtQml\nQtObject { property Timer clock: Ti@ }', 'Timer', 'QtQml'),
+                    ('import QtQuick\nItem { Component.onCompleted: { Com@ } }', 'Component', 'QML'),
+                    ('import Acme.Widgets\nKn@ {}', 'Knob', 'Acme.Widgets'),
+                    ('import Acme.Widgets as Widgets\nWidgets.Kn@ {}', 'Knob', 'Acme.Widgets'),
+                    ('import QtQuick\nItem { Fan@ {} }', 'Fancy', 'Fancy.qml'),
+                ]
+                for document, label, expected_origin in origins:
+                    completion = next(i for i in server.complete(document) if i['label'] == label)
+                    assert completion.get('labelDetails', {}).get('description') == expected_origin, completion
+                    print('PASS defining module', label, expected_origin)
                 cases = [
                     ('Layout.alignment: @', 'Qt.AlignCenter'),
                     ('Layout.alignment: Qt.@', 'AlignCenter'),
