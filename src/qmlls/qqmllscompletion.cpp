@@ -369,7 +369,7 @@ void QQmlLSCompletion::jsIdentifierCompletion(const QQmlJSScope::ConstPtr &scope
 
 void QQmlLSCompletion::methodCompletion(const QQmlJSScope::ConstPtr &scope,
                                         QDuplicateTracker<QString> *usedNames,
-                                        BackInsertIterator it) const
+                                        BackInsertIterator it, bool callContext) const
 {
     // JS functions in current and base scopes
     for (const auto &[name, method] : scope->methods().asKeyValueRange()) {
@@ -384,6 +384,7 @@ void QQmlLSCompletion::methodCompletion(const QQmlJSScope::ConstPtr &scope,
         // The compiler already knows these signatures. Keep them in standard
         // LSP fields rather than making clients infer arguments from the name.
         QStringList signatures;
+        QStringList callParameters;
         bool parameterNamesAvailable = true;
         auto declaringScope = scope;
         while (declaringScope && declaringScope->ownMethods(name).isEmpty())
@@ -395,6 +396,7 @@ void QQmlLSCompletion::methodCompletion(const QQmlJSScope::ConstPtr &scope,
                 continue;
             QStringList parameters;
             for (const auto &parameter : overload.parameters()) {
+                if (signatures.isEmpty()) callParameters.append(parameter.name());
                 QString value = parameter.name();
                 parameterNamesAvailable = parameterNamesAvailable && !value.isEmpty();
                 if (!parameter.typeName().isEmpty()) {
@@ -422,6 +424,21 @@ void QQmlLSCompletion::methodCompletion(const QQmlJSScope::ConstPtr &scope,
                     ? signatures.first().mid(name.size()).toUtf8()
                     : (u" · "_s + summary).toUtf8();
             completion.labelDetails = labelDetails;
+            if (callContext && singleNamedSignature) {
+                const auto escaped = [](QString value) {
+                    value.replace(u'\\', u"\\\\"_s);
+                    value.replace(u'$', u"\\$"_s);
+                    value.replace(u'}', u"\\}"_s);
+                    return value;
+                };
+                QString snippet = escaped(name) + u'(';
+                for (qsizetype index = 0; index < callParameters.size(); ++index) {
+                    if (index) snippet += u", "_s;
+                    snippet += u"${%1:%2}"_s.arg(index + 1).arg(escaped(callParameters[index]));
+                }
+                completion.insertText = (snippet + u")$0"_s).toUtf8();
+                completion.insertTextFormat = InsertTextFormat::Snippet;
+            }
             MarkupContent documentation;
             documentation.kind = MarkupKind::Markdown;
             documentation.value = (u"```qml\n"_s + signatures.join(u'\n') + u"\n```"_s).toUtf8();
@@ -595,10 +612,17 @@ from the correct type. For the previous example that would be properties, method
 Component attached type.
 */
 void QQmlLSCompletion::suggestJSExpressionCompletion(const DomItem &scriptIdentifier,
-                                                     BackInsertIterator result) const
+                                                     BackInsertIterator result, bool callContext) const
 {
     QDuplicateTracker<QString> usedNames;
     QQmlJSScope::ConstPtr nearestScope;
+    // A function used as a receiver must remain a reference, even in a statement.
+    for (DomItem expression = scriptIdentifier; callContext && expression;
+         expression = expression.directParent()) {
+        if (QQmlLSUtils::isFieldMemberBase(expression)) callContext = false;
+        if (expression.internalKind() == DomType::ScriptBlockStatement
+            || expression.internalKind() == DomType::ScriptExpression) break;
+    }
 
     const DomItem owner = ownerOfQualifiedExpression(scriptIdentifier);
 
@@ -641,7 +665,7 @@ void QQmlLSCompletion::suggestJSExpressionCompletion(const DomItem &scriptIdenti
             // `property real p: Component.progress`.
             if (QQmlJSScope::ConstPtr attachedType =
                 ownerExpressionType->semanticScope->attachedType()) {
-                methodCompletion(attachedType, &usedNames, result);
+                methodCompletion(attachedType, &usedNames, result, callContext);
                 propertyCompletion(attachedType, &usedNames, result);
                 suggestEnumerationsAndEnumerationValues(
                         attachedType, *ownerExpressionType->name, usedNames, result);
@@ -659,7 +683,7 @@ void QQmlLSCompletion::suggestJSExpressionCompletion(const DomItem &scriptIdenti
 
     Q_ASSERT(nearestScope);
 
-    methodCompletion(nearestScope, &usedNames, result);
+    methodCompletion(nearestScope, &usedNames, result, callContext);
     propertyCompletion(nearestScope, &usedNames, result);
 
     if (!owner) {
@@ -670,8 +694,8 @@ void QQmlLSCompletion::suggestJSExpressionCompletion(const DomItem &scriptIdenti
                 },
                 nearestScope);
         collectFromAllJavaScriptParents(
-                [this, &usedNames, result](const QQmlJSScope::ConstPtr &scope) {
-                    methodCompletion(scope, &usedNames, result);
+                [this, &usedNames, result, callContext](const QQmlJSScope::ConstPtr &scope) {
+                    methodCompletion(scope, &usedNames, result, callContext);
                 },
                 nearestScope);
         collectFromAllJavaScriptParents(
@@ -688,7 +712,7 @@ void QQmlLSCompletion::suggestJSExpressionCompletion(const DomItem &scriptIdenti
             return;
 
         const auto globals = resolver->jsGlobalObject();
-        methodCompletion(globals, &usedNames, result);
+        methodCompletion(globals, &usedNames, result, callContext);
         propertyCompletion(globals, &usedNames, result);
     }
 }
@@ -1169,7 +1193,7 @@ does not strike as being very useful \endlist
 void QQmlLSCompletion::suggestJSStatementCompletion(const DomItem &itemAtPosition,
                                                     BackInsertIterator result) const
 {
-    suggestJSExpressionCompletion(itemAtPosition, result);
+    suggestJSExpressionCompletion(itemAtPosition, result, true);
 
     if (QQmlLSUtils::isFieldMemberAccess(itemAtPosition)
         || QQmlLSUtils::isFieldMemberExpression(itemAtPosition))

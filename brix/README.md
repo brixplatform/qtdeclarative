@@ -20,6 +20,9 @@ in the language server, so every LSP client can receive the same semantic result
   `font.weight` as `int`; `Font.` completes its named constants without pretending
   the property is an enum. No native metaobject/plugin is loaded for inference.
 
+- Emit provider-authored named-parameter call snippets for single-signature methods
+  in JavaScript statement positions. Assignments, callback arguments, existing
+  calls, receiver uses and returns keep function references.
 - Preserve compiler-known method signatures, return/parameter types and overload
   documentation in standard LSP fields. Ambiguous overloads remain explicit;
   clients must not treat an arbitrary overload as the required call signature.

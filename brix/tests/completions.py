@@ -228,6 +228,24 @@ def main():
                 assert method['detail'] == 'sum(x: int, y: int): int', method
                 assert method['labelDetails']['detail'] == '(x: int, y: int): int', method
                 print('PASS compiler method signature', method['detail'])
+                assert method['insertTextFormat'] == 2, method
+                assert method['insertText'] == 'sum(${1:x}, ${2:y})$0', method
+                contexts = [
+                    ('const handler = su@', False),
+                    ('use(su@)', False),
+                    ('return su@', False),
+                    ('su@(1, 2)', False),
+                    ('su@.bind(null)', False),
+                    ('root.su@', True),
+                    ('const handler = root.su@', False),
+                ]
+                for expression, call in contexts:
+                    source = ('import QtQuick\nItem { id: root; function sum(x: int, y: int): int { return x + y; } '
+                              'function use(callback: var) {} Component.onCompleted: { ' + expression + ' } }')
+                    item = next(i for i in server.complete(source) if i['label'] == 'sum')
+                    insertion = item.get('textEdit', {}).get('newText', item.get('insertText', item['label']))
+                    assert insertion == ('sum(${1:x}, ${2:y})$0' if call else 'sum'), (expression, item)
+                print('PASS compiler method call/reference contexts')
                 # Only QML object declarations receive braces. Annotations and
                 # embedded JS references retain their standard Class metadata.
                 objects = [

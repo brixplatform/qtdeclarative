@@ -94,7 +94,8 @@ private:
                                                  QDuplicateTracker<QString> &usedNames,
                                                  BackInsertIterator result) const;
     DomItem ownerOfQualifiedExpression(const DomItem &qualifiedExpression) const;
-    void suggestJSExpressionCompletion(const DomItem &context, BackInsertIterator it) const;
+    void suggestJSExpressionCompletion(const DomItem &context, BackInsertIterator it,
+                                       bool callContext = false) const;
 
     void suggestBindingCompletion(const DomItem &itemAtPosition, BackInsertIterator it) const;
 
@@ -106,7 +107,7 @@ private:
                                 QDuplicateTracker<QString> *usedNames, BackInsertIterator it) const;
 
     void methodCompletion(const QQmlJSScope::ConstPtr &scope, QDuplicateTracker<QString> *usedNames,
-                          BackInsertIterator it) const;
+                          BackInsertIterator it, bool callContext) const;
     void propertyCompletion(const QQmlJSScope::ConstPtr &scope,
                             QDuplicateTracker<QString> *usedNames, BackInsertIterator it) const;
     void enumerationCompletion(const QQmlJSScope::ConstPtr &scope,
